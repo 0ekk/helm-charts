@@ -7,6 +7,7 @@
 # result gets the same scrutiny as one authored in this repo.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source scripts/lib.sh
 
 out_dir="${1:?usage: build.sh <out-dir>}"
 mkdir -p "$out_dir"
@@ -62,6 +63,12 @@ for chart_dir in charts/*/; do
   if (( has_provision )); then
     echo "== provisioning ${name} =="
     bash "${chart_dir}provision.sh" "$chart_out_dir"
+    if [[ -d "${chart_dir}overlay" || -d "${chart_dir}patches" || -d "${chart_dir}yq" ]]; then
+      echo "== applying overlay to ${name} =="
+      for tgz in "$chart_out_dir"/*.tgz; do
+        apply_overlay "$chart_dir" "$tgz"
+      done
+    fi
   else
     echo "== packaging ${name} =="
     helm package "$chart_dir" -d "$chart_out_dir"

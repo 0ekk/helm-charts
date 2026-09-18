@@ -45,6 +45,51 @@ Source chart:
 Provisioned chart: just `charts/<name>/provision.sh`, executable, taking one
 argument (the output directory) and producing one packaged `.tgz` there.
 
+### Overlay on a provisioned chart
+
+`scripts/build.sh` modifies the packaged upstream chart before validating it
+(`apply_overlay` in `scripts/lib.sh`), in this order:
+
+1. `charts/<name>/overlay/` — copied over the chart root, whole files added or
+   replaced (e.g. `overlay/templates/extra.yaml`).
+2. `charts/<name>/patches/*.patch` — `git apply`'d in lexical order, paths
+   relative to the chart root. For text edits yq can't express (templates).
+3. `charts/<name>/yq/<path>.yq` — a yq expression run in place on `<path>`
+   (e.g. `yq/values.yaml.yq` edits `values.yaml`). Preferred for YAML
+   (`values.yaml`, `Chart.yaml`): it survives upstream reformatting that
+   breaks a patch. Never copy a whole `values.yaml` into `overlay/` — it
+   would freeze everything upstream changes later (code-server's pins
+   `image.tag`).
+
+A patch that no longer applies to a newer upstream fails the whole build —
+fix or drop it. Author a patch against the pristine chart:
+
+```sh
+charts/<name>/provision.sh /tmp/p && tar xzf /tmp/p/*.tgz -C /tmp/p
+cd /tmp/p/<name> && git init -q && git add -A     # staged = pristine base
+# edit files (`git add -N` any new file), then:
+mkdir -p "$OLDPWD/charts/<name>/patches"
+git diff > "$OLDPWD/charts/<name>/patches/0001-<topic>.patch"
+```
+
+A yq expression never fails on its own: if upstream renames a key, `=`
+silently creates a dead one. Guard keys you set on purpose, chaining
+statements with `|` (`#` comments are allowed):
+
+```
+# charts/code-server/yq/values.yaml.yq
+.replicaCount = 2 |
+with(.image; has("pullPolicy") or error("image.pullPolicy gone upstream")) |
+.image.pullPolicy = "IfNotPresent"
+```
+
+yq keeps every value and comment, but rewrites the file's layout: blank
+lines are dropped and comments inside maps are un-indented.
+
+The chart version stays equal to the upstream version, and published
+versions are immutable, so an overlay change is validated right away but
+only ships with the next upstream release.
+
 ## Local commands
 
 ```sh

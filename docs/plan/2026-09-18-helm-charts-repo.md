@@ -322,3 +322,76 @@ wrapping the grep in `{ ... || true; }`), a push with no resolvable `before`
 and a schedule with no bump. Not verified: an actual GitHub-hosted
 `pull_request` event and a real `push` with a genuine `before` SHA, since
 those need real CI context — checked on the next real push/PR instead.
+
+## Addendum: overlay on provisioned charts (2026-09-18)
+
+**Rationale**: a provisioned chart was packaged byte-for-byte from upstream,
+with no way to change its `values.yaml`, templates or any other file.
+Requested by the repo owner.
+
+**Decisions** (confirmed by repo owner):
+- Two mechanisms, applied by `scripts/build.sh` right after `provision.sh`
+  (`apply_overlay` in `scripts/lib.sh`), so every provisioned chart gets them
+  without touching its own `provision.sh`: `charts/<name>/overlay/` is copied
+  over the unpacked chart (whole-file add/replace), then
+  `charts/<name>/patches/*.patch` are applied with `git apply` in lexical
+  order, and the `.tgz` is repackaged in place. Validation (lint +
+  kubeconform) then runs on the overlaid package as before.
+- Patches, not whole-file copies, are the way to edit upstream files: upstream
+  `values.yaml` pins `image.tag` to the release, so a copied `values.yaml`
+  would silently freeze it while `appVersion` keeps moving. `git apply` is
+  strict (no fuzz, all-or-nothing), so upstream drift under a patch fails
+  the build instead of mis-applying.
+- Versioning unchanged: chart version = upstream version. An overlay change
+  is validated immediately but ships only with the next upstream release;
+  the already-published version is skipped by `scripts/publish.sh` as
+  before. Rejected: a SemVer build-metadata suffix (`4.137.0+1`), because
+  SemVer ignores build metadata for ordering, so Helm would treat it as
+  equal to `4.137.0` and pick either.
+
+**Impact**: no change for charts without `overlay/` or `patches/`
+(code-server has neither today). A stale patch blocks the whole build —
+and so publishing of every chart — until it is fixed or removed.
+
+**Verified**: `scripts/test-lib.sh` gains three checks on a throwaway chart
+(patch applied, overlay file added, stale patch fails the call). End to end:
+a temporary `charts/code-server/patches/0001-demo.patch` (generated with the
+`git diff` workflow in AGENTS.md, `replicaCount: 1` → `2`) plus
+`overlay/templates/overlay-demo.yaml` produced a `code-server-4.137.0.tgz`
+containing both changes, which passed lint and kubeconform; a hand-written
+malformed patch made `scripts/build.sh` stop at the overlay step. Also
+confirmed `git apply` still works when `TMPDIR` is inside another git
+checkout (it applies relative to the current subdirectory). Demo files were
+removed afterwards.
+
+### Follow-up: yq expressions (2026-09-18)
+
+**Rationale**: a unified diff breaks whenever upstream touches the lines
+around its hunk, even when the change it makes still makes sense. Requested
+by the repo owner as a sturdier way to edit YAML.
+
+**Decisions**:
+- Third step, `charts/<name>/yq/<path>.yq`: the file's content is a yq
+  expression run with `yq -i --from-file` on `<path>` in the chart (path
+  mirrored, `.yq` stripped). No new dependency — `scripts/build.sh` already
+  requires mikefarah yq v4, which `ubuntu-latest` preinstalls.
+- Order is overlay → patches → yq. yq rewrites the file's layout, so running
+  it before patches would break their context; running last means it only
+  ever sees the final content.
+- yq's failure mode is the opposite of a patch's: a renamed upstream key
+  makes `=` silently create a dead key instead of failing. Not enforced in
+  code; AGENTS.md documents a `with(.x; has("k") or error(...))` guard the
+  expression author adds for keys that matter.
+- Accepted cost: yq drops blank lines and un-indents comments nested in maps
+  across the whole file, so `helm show values` of an overlaid chart reads
+  worse than upstream. Values are unchanged.
+
+**Verified**: `scripts/test-lib.sh`'s overlay check now also runs a
+`yq/values.yaml.yq` after the patch and asserts both edits land. On the real
+code-server 4.137.0 chart, a temporary `yq/values.yaml.yq` setting
+`replicaCount` and a guarded `image.pullPolicy` went through a full
+`scripts/build.sh` (lint + kubeconform clean); `yq -o json` of the original
+and overlaid `values.yaml` differ only in those two keys (layout changes
+only otherwise, including `extraContainers: |` → `""`, both the empty
+string); a guard on a missing key (`image.nope`) made `apply_overlay` exit 1
+with the guard's message. Demo files removed afterwards.
