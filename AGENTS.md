@@ -7,6 +7,10 @@ GitHub Releases — `gh-pages`' `index.yaml` + the packaged `.tgz` files are the
 only distribution artifact. See `docs/plan/2026-09-18-helm-charts-repo.md`
 for the full design rationale.
 
+Retention: `scripts/publish.sh` deletes every package first published to
+`gh-pages` more than a year ago (date = the last git commit that added the
+`.tgz`; a move doesn't count), except each chart's newest version.
+
 ## Layout
 
 ```

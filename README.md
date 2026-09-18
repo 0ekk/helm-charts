@@ -24,7 +24,8 @@ provisioning scripts, installs each into a `kind` cluster and runs `helm
 test`, and — on `main` only — publishes the resulting `.tgz` files plus a
 regenerated `index.yaml` to the `gh-pages` branch. There are no GitHub
 Releases; `gh-pages` is the sole distribution artifact, and published
-versions are immutable.
+versions are immutable. A version is removed one year after it was
+published, except each chart's newest version, which is always kept.
 
 On the daily/manual runs, charts annotated with an upstream repo (see
 `AGENTS.md`) are checked for a newer stable upstream release and bumped

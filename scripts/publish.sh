@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Publishes every <dist-dir>/<component>/*.tgz to the gh-pages branch, one
 # directory per component: copies new packages (existing ones are immutable
-# and skipped), rebuilds index.yaml from the tgz set (source of truth, so a
+# and skipped), prunes packages published over a year ago except each chart's
+# newest version, rebuilds index.yaml from the tgz set (source of truth, so a
 # repo rename needs no migration step), regenerates gh-pages/README.md,
 # commits and pushes.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source scripts/lib.sh
 
 dist_dir="${1:?usage: publish.sh <dist-dir>}"
 repo_name="$(basename -s .git "$(git remote get-url origin)")"
@@ -52,13 +54,20 @@ for tgz in "$dist_dir"/*/*.tgz; do
 done
 shopt -u nullglob
 
+removed=0
+while IFS= read -r base; do
+  echo "::notice::pruning ${base}: published over a year ago"
+  rm -f "$worktree_dir/$base" "$worktree_dir"/*/"$base"
+  removed=1
+done < <(expired_packages "$worktree_dir" "$(date -d '1 year ago' +%s)")
+
 index_is_current() {
   local idx="$1"
   [[ -f "$idx" ]] || return 1
   ! yq '.entries[][].urls[]' "$idx" | grep -qv "^${chart_repo_url}/"
 }
 
-if (( ! added )) && index_is_current "$worktree_dir/index.yaml"; then
+if (( ! added && ! removed )) && index_is_current "$worktree_dir/index.yaml"; then
   echo "nothing new to publish; index already up to date"
   exit 0
 fi

@@ -38,4 +38,28 @@ if bash -euo pipefail -c 'source lib.sh; apply_overlay "$@"' _ \
 fi
 echo "ok: apply_overlay fails on a stale patch"
 
+# expired_packages: 3.0.0 is old but newest (kept), 2.0.0 is recent (kept),
+# 1.0.0 is old and its later move into demo/ must not count as a re-add.
+pages="$tmp/pages"
+mkdir -p "$pages/demo"
+git init -q "$pages"
+printf 'entries:\n  demo:\n' > "$pages/index.yaml"
+for v in 3.0.0 2.0.0 1.0.0; do
+  printf '    - urls: [https://x/demo/demo-%s.tgz]\n' "$v" >> "$pages/index.yaml"
+done
+# Throwaway fixture repo: fixed dates, isolated from the caller's git config.
+fixture_commit() {
+  git -C "$pages" add -A
+  GIT_CONFIG_GLOBAL=/dev/null GIT_COMMITTER_DATE="@$1 +0000" GIT_AUTHOR_DATE="@$1 +0000" \
+    git -C "$pages" -c user.name=test -c user.email=test@example.com commit -qm "at $1"
+}
+echo 1 > "$pages/demo-1.0.0.tgz"
+echo 3 > "$pages/demo/demo-3.0.0.tgz"
+fixture_commit 1600000000
+echo 2 > "$pages/demo/demo-2.0.0.tgz"
+fixture_commit 1700000000
+git -C "$pages" mv demo-1.0.0.tgz demo/
+fixture_commit 1750000000
+assert_eq "demo-1.0.0.tgz" "$(expired_packages "$pages" 1650000000)" "expired_packages skips newest and recent, ignores moves"
+
 echo "All tests passed."

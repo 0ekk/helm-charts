@@ -395,3 +395,50 @@ and overlaid `values.yaml` differ only in those two keys (layout changes
 only otherwise, including `extraContainers: |` → `""`, both the empty
 string); a guard on a missing key (`image.nope`) made `apply_overlay` exit 1
 with the guard's message. Demo files removed afterwards.
+
+## Addendum: prune packages older than a year (2026-09-18)
+
+**Rationale**: `gh-pages` only ever grew; every published version stayed in
+`index.yaml` forever. Requested by the repo owner: automatically remove
+charts published more than a year ago.
+
+**Decisions**:
+- Age = time since the package was last *added* to `gh-pages`, from git
+  history (`git log -M --diff-filter=A -n1`, per `.tgz` basename, at the root
+  or in a component directory). `index.yaml`'s `created` can't be used:
+  `publish.sh` reindexes without `--merge`, so every reindex resets it (on
+  the live branch all 18 entries read `2026-09-18T17:14:51`). With `-M`, the
+  one-time move into per-component directories is a rename, not an add, so
+  the original publish date survives it. A package that is removed and later
+  re-published counts from its re-publish, so it can't be pruned and
+  re-added every day.
+- Each chart's newest version (first entry in `index.yaml`, which
+  `helm repo index` sorts newest first) is never pruned, so an unchanged
+  chart never disappears. The existing index is read before this run's
+  reindex: a version published in the same run isn't in it yet, so the
+  previous newest version stays protected one more run.
+- Runs inside `scripts/publish.sh` (`expired_packages` in `scripts/lib.sh`)
+  on every main push and the daily cron, before the "nothing new" early
+  exit, which now also requires nothing pruned. Cutoff is
+  `date -d '1 year ago'` (GNU date, as on `ubuntu-latest`); not
+  configurable.
+- A missing add date (e.g. a shallow `gh-pages` fetch) means "don't prune".
+  CI checks out with `fetch-depth: 0`, so history is complete there.
+  Removed files stay in `gh-pages` git history; only the served branch tip
+  and `index.yaml` shrink.
+
+**Impact**: consumers pinned to a version published over a year ago lose
+it from the repo index. No effect until 2027-06-01, one year after the
+first code-server package (4.122.0) was added.
+
+**Verified**: `scripts/test-lib.sh` checks `expired_packages` on a
+throwaway repo with backdated commits (old newest version kept, recent
+version kept, old version moved into a subdirectory later still expires).
+The fixture's commits run with `GIT_CONFIG_GLOBAL=/dev/null` and a test
+identity, so they need no signing key and work in CI. Against the real
+`gh-pages` history with a 2026-07-01 cutoff, it lists exactly the six
+code-server versions added in June 2026 (4.122.0–4.126.0). End to end, in a
+scratch clone whose `origin` is a local bare repo seeded with the real
+`gh-pages`: a normal run is a no-op; with `date` shimmed to a 2026-07-01
+cutoff, `publish.sh` pruned those six, the regenerated `index.yaml` kept
+11 code-server versions plus distribution 0.1.0, and a rerun was a no-op.

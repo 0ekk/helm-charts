@@ -58,3 +58,21 @@ apply_overlay() {
   helm package "$chart_dir" -d "$(dirname "$tgz")" >/dev/null
   rm -rf "$work_dir"
 }
+
+# expired_packages <gh-pages-dir> <cutoff-epoch>: prints the file name of each
+# package in <gh-pages-dir>/index.yaml whose latest add to the branch predates
+# <cutoff-epoch>, never a chart's newest version. The add date comes from git
+# history (a move is not an add), not index.yaml's `created`, which every
+# reindex resets.
+expired_packages() {
+  local dir="$1" cutoff="$2" url base added
+  [[ -f "$dir/index.yaml" ]] || return 0
+  # helm repo index sorts each chart's versions newest first.
+  yq '.entries[] | .[1:] | .[].urls[0]' "$dir/index.yaml" | while IFS= read -r url; do
+    base="${url##*/}"
+    added="$(git -C "$dir" log -M --diff-filter=A --format=%ct -n1 -- "$base" "*/$base")"
+    if [[ -n "$added" ]] && (( added < cutoff )); then
+      echo "$base"
+    fi
+  done
+}
