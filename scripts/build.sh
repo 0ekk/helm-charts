@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Validates and packages every chart under charts/*/ into <out-dir>.
+# Validates and packages every chart under charts/*/ into <out-dir>/<name>/.
 # Source chart (has Chart.yaml): helm lint, helm template per ci/*-values.yaml
 # (and defaults) piped through kubeconform, then helm package.
 # Provisioned chart (has only provision.sh): delegates entirely to it.
+# Packages land one directory per chart name so publish.sh can mirror that
+# layout onto gh-pages instead of dumping every version in one flat folder.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -32,9 +34,12 @@ for chart_dir in charts/*/; do
     exit 1
   fi
 
+  chart_out_dir="$out_dir/$name"
+  mkdir -p "$chart_out_dir"
+
   if (( has_provision )); then
     echo "== provisioning ${name} =="
-    bash "${chart_dir}provision.sh" "$out_dir"
+    bash "${chart_dir}provision.sh" "$chart_out_dir"
     continue
   fi
 
@@ -48,5 +53,5 @@ for chart_dir in charts/*/; do
   done
   shopt -u nullglob
 
-  helm package "$chart_dir" -d "$out_dir"
+  helm package "$chart_dir" -d "$chart_out_dir"
 done

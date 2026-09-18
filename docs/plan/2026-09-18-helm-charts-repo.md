@@ -221,3 +221,46 @@ CI installs the same pinned version) and a scratch `kind` cluster:
 
 Remaining before rollout: repo owner review of the diff, then rollout steps
 2–5 (rename, first push, old-release cleanup) as documented above.
+
+Rollout completed 2026-09-18: repo renamed to `0ekk/helm-charts`, `main`
+pushed (release.yaml ran green), `gh-pages` reindexed under the new URL,
+17 old `v4.x` releases + tags deleted.
+
+## Addendum: per-component gh-pages layout (2026-09-18)
+
+**Rationale**: all `.tgz` packages were published flat at the `gh-pages`
+root (`code-server-4.137.0.tgz`, `distribution-0.1.0.tgz`, …). As more
+charts get added this becomes hard to browse and invites filename
+collisions across unrelated charts. Requested by the repo owner.
+
+**Decision**: `dist/` (the output of `scripts/build.sh`) and `gh-pages` both
+organize packages as `<component>/<component>-<version>.tgz` instead of a
+flat directory. `helm repo index` walks subdirectories natively and encodes
+the relative path in each entry's `urls`, so `index.yaml` needs no other
+change; `scripts/publish.sh`'s "skip if already published" and
+"index already up to date" checks now key off the per-component path
+instead of the bare filename.
+
+**Impact**:
+- `scripts/build.sh`: source charts package into `<out-dir>/<name>/`;
+  provisioned charts get `<out-dir>/<name>/` as their own `<out-dir>` arg
+  (their contract — "package into the given directory" — didn't need to
+  change).
+- `scripts/publish.sh`: copies `<dist-dir>/<component>/*.tgz` into
+  `gh-pages/<component>/`, preserving the split.
+- One-time migration of the 18 already-published packages on `gh-pages`
+  from the flat layout into `code-server/` and `distribution/`, done
+  directly against the live branch (not scripted into the repo — it only
+  ever needs to run once; every future publish already lands in the
+  right place). `index.yaml` was regenerated afterward so its `urls`
+  match the new paths.
+- No change to the chart-repo add command, `index.yaml`'s schema, or any
+  chart's own contents — only where the `.tgz` files live.
+
+**Verified**: `helm repo index` confirmed locally to emit correct relative
+subdirectory URLs; `scripts/build.sh` produces the new layout end-to-end;
+`scripts/publish.sh` tested against a scratch bare repo seeded with an
+already-migrated `gh-pages` — steady state is a no-op, and a new version
+correctly lands under its component directory with no duplicate index
+entries. The real migration + reindex was applied to the live `gh-pages`
+branch and checked with `helm repo update && helm search repo`.

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Publishes every *.tgz in <dist-dir> to the gh-pages branch: copies new
-# packages (existing ones are immutable and skipped), rebuilds index.yaml
-# from the tgz set (source of truth, so a repo rename needs no migration
-# step), regenerates gh-pages/README.md, commits and pushes.
+# Publishes every <dist-dir>/<component>/*.tgz to the gh-pages branch, one
+# directory per component: copies new packages (existing ones are immutable
+# and skipped), rebuilds index.yaml from the tgz set (source of truth, so a
+# repo rename needs no migration step), regenerates gh-pages/README.md,
+# commits and pushes.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -29,13 +30,16 @@ git -C "$worktree_dir" config user.email "41898282+github-actions[bot]@users.nor
 
 added=0
 shopt -s nullglob
-for tgz in "$dist_dir"/*.tgz; do
+for tgz in "$dist_dir"/*/*.tgz; do
+  component="$(basename "$(dirname "$tgz")")"
   base="$(basename "$tgz")"
-  if [[ -f "$worktree_dir/$base" ]]; then
-    echo "::notice::${base} already published, skipping"
+  dest_dir="$worktree_dir/$component"
+  if [[ -f "$dest_dir/$base" ]]; then
+    echo "::notice::${component}/${base} already published, skipping"
     continue
   fi
-  cp "$tgz" "$worktree_dir/$base"
+  mkdir -p "$dest_dir"
+  cp "$tgz" "$dest_dir/$base"
   added=1
 done
 shopt -u nullglob
