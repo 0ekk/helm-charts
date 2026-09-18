@@ -177,7 +177,9 @@ Order bump → validate → commit → publish in one run is required: pushes ma
    first real upstream release).
 
 Skipped: source-chart "forgot to bump" detection (skip + notice only; add a content diff
-check if it bites), values.schema.json, OCI push, LICENSE.
+check if it bites), values.schema.json, OCI push.
+LICENSE added 2026-09-18: Apache-2.0, covers this repo's chart sources and
+scripts only — each chart's own upstream software keeps its own license.
 
 ## Verification results (2026-09-18)
 

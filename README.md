@@ -33,3 +33,8 @@ publishing proceed.
 
 See `AGENTS.md` for the repo layout and how to add a chart, and
 `docs/plan/2026-09-18-helm-charts-repo.md` for the full design rationale.
+
+## License
+
+[Apache License 2.0](LICENSE). Applies to the chart sources and scripts in
+this repo — each chart's own upstream software keeps its own license.
