@@ -25,8 +25,16 @@ else
   git -C "$worktree_dir" rm -rf . >/dev/null 2>&1 || true
 fi
 
-git -C "$worktree_dir" config user.name "github-actions[bot]"
-git -C "$worktree_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+# -c instead of `git config`: a worktree shares its parent repo's config
+# file by default, so a persistent `git config` here would silently
+# overwrite the caller's own identity when this script is run locally
+# (see docs/plan/2026-09-18-helm-charts-repo.md).
+git_bot() {
+  git -C "$worktree_dir" \
+    -c user.name="github-actions[bot]" \
+    -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+    "$@"
+}
 
 added=0
 shopt -s nullglob
@@ -82,5 +90,5 @@ if git -C "$worktree_dir" diff --cached --quiet; then
   echo "no gh-pages changes to publish"
   exit 0
 fi
-git -C "$worktree_dir" commit -m "Publish charts"
+git_bot commit -m "Publish charts"
 git -C "$worktree_dir" push origin HEAD:gh-pages
