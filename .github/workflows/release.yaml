@@ -58,25 +58,61 @@ jobs:
             echo "BUMP_EOF"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Determine changed source charts
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base_sha="${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}"
+          before_sha="${{ github.event_name == 'push' && github.event.before || '' }}"
+
+          diff_paths=""
+          case "${{ github.event_name }}" in
+            pull_request)
+              diff_paths="$(git diff --name-only "$base_sha" HEAD -- charts)"
+              ;;
+            push)
+              if [[ -n "$before_sha" ]] && git cat-file -e "$before_sha" 2>/dev/null; then
+                diff_paths="$(git diff --name-only "$before_sha" HEAD -- charts)"
+              else
+                # New branch (no previous commit to diff against): everything
+                # currently under charts/ counts as changed.
+                diff_paths="$(git ls-tree -r --name-only HEAD -- charts)"
+              fi
+              ;;
+            schedule|workflow_dispatch)
+              # Only what scripts/bump.sh actually touched, if anything.
+              diff_paths="${{ steps.bump.outputs.changed }}"
+              ;;
+          esac
+
+          {
+            echo "dirs<<CHANGED_EOF"
+            printf '%s\n' "$diff_paths" | { grep -o '^charts/[^/]\+' || true; } | sort -u
+            echo "CHANGED_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Build and validate charts
         shell: bash
         run: scripts/build.sh dist
 
       - name: Create kind cluster
-        if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.bump.outputs.changed != ''
+        if: steps.changed.outputs.dirs != ''
         uses: helm/kind-action@v1
 
-      - name: Install and test each source chart scenario
-        if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.bump.outputs.changed != ''
+      - name: Install and test each changed source chart scenario
+        if: steps.changed.outputs.dirs != ''
         shell: bash
         run: |
           set -euo pipefail
-          for chart_dir in charts/*/; do
-            [[ -f "${chart_dir}Chart.yaml" ]] || continue
+          while IFS= read -r chart_dir; do
+            [[ -n "$chart_dir" ]] || continue
+            [[ -f "$chart_dir/Chart.yaml" ]] || continue
             chart_name="$(basename "$chart_dir")"
 
             shopt -s nullglob
-            values_files=("${chart_dir}"ci/*-values.yaml)
+            values_files=("$chart_dir"/ci/*-values.yaml)
             shopt -u nullglob
             [[ ${#values_files[@]} -gt 0 ]] || values_files=("__default__")
 
@@ -94,7 +130,7 @@ jobs:
               helm test "$release"
               helm uninstall "$release" --wait
             done
-          done
+          done <<< "${{ steps.changed.outputs.dirs }}"
 
       - name: Commit version bumps
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.bump.outputs.changed != ''

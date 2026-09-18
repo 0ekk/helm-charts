@@ -264,3 +264,59 @@ already-migrated `gh-pages` — steady state is a no-op, and a new version
 correctly lands under its component directory with no duplicate index
 entries. The real migration + reindex was applied to the live `gh-pages`
 branch and checked with `helm repo update && helm search repo`.
+
+## Addendum: validate the packaged tgz, scope kind tests to changed charts (2026-09-18)
+
+**Rationale**: `scripts/build.sh` only ran `helm lint` + kubeconform against a
+source chart's source tree; a provisioned chart got none of that — only
+whatever `helm lint` its own `provision.sh` happened to call, on the
+upstream source tree, never on the actual package it produces. That's an
+asymmetry between the two integration paths with no technical reason behind
+it. Separately, the kind-install + `helm test` step always swept every
+source chart's every `ci/*-values.yaml` scenario on every push/PR, which
+doesn't scale as chart and scenario counts grow.
+
+**Decisions**:
+- `scripts/build.sh` now validates the *packaged* `.tgz` — for both source
+  and provisioned charts — instead of the source tree. Since this Helm
+  build only accepts chart directories (not archives) for `lint`/`template`,
+  it unpacks the just-produced `.tgz` into a temp dir and lints/templates
+  that. This is why a provisioned chart's `ci/*-values.yaml` (if it ever
+  gets one) would already be picked up for free — the loop keys off
+  `<chart-dir>/ci/*-values.yaml` regardless of chart kind.
+- The kind-install + `helm test` step is now scoped to only the *source*
+  chart directories that changed in the current push/PR/scheduled bump
+  (including newly-added ones), not every source chart every run.
+  Provisioned charts stay out of scope for kind testing — they don't carry
+  a local `templates/tests/*.yaml` hook or `ci/` scenarios by contract
+  (AGENTS.md's provisioned-chart shape is just `provision.sh`), so there's
+  nothing chart-repo-local to install-test yet; only the lint/kubeconform
+  pass (previous decision) applies to them today.
+- "Changed" is computed per trigger: `git diff --name-only` against
+  `github.event.before` for `push` (falling back to "everything under
+  `charts/`" when `before` isn't a resolvable commit, e.g. a repo's first
+  push), against `github.event.pull_request.base.sha` for `pull_request`,
+  and from `scripts/bump.sh`'s own changed-`Chart.yaml` list for
+  `schedule`/`workflow_dispatch` (already exactly the source charts a bump
+  touched).
+
+**Impact**: `code-server`'s packaged chart now gets the same kubeconform
+pass `distribution` gets. CI no longer re-installs every scenario of every
+source chart on every push — only what actually changed. A commit that
+only touches `scripts/` or docs skips the kind cluster + install steps
+entirely.
+
+**Verified**: confirmed locally that this Helm build's `lint`/`template`
+reject `.tgz` paths directly (`invalid chart URL format`), which is why the
+unpack-then-lint approach is needed; `scripts/build.sh` re-run end to end
+now shows `code-server`'s package going through the same kubeconform check
+as `distribution`. The "changed dirs" logic was rehearsed standalone against
+real repo history for all four branches: a push whose diff touched only
+`scripts/` (correctly empty — the exact regression this addendum's local
+rehearsal caught: `grep -o` finding no match combined with
+`set -o pipefail` was aborting the step whenever nothing changed, fixed by
+wrapping the grep in `{ ... || true; }`), a push with no resolvable `before`
+(all current charts reported), a schedule with a bump touching one chart,
+and a schedule with no bump. Not verified: an actual GitHub-hosted
+`pull_request` event and a real `push` with a genuine `before` SHA, since
+those need real CI context — checked on the next real push/PR instead.

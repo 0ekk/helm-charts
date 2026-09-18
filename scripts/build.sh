@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Validates and packages every chart under charts/*/ into <out-dir>/<name>/.
-# Source chart (has Chart.yaml): helm lint, helm template per ci/*-values.yaml
-# (and defaults) piped through kubeconform, then helm package.
-# Provisioned chart (has only provision.sh): delegates entirely to it.
-# Packages land one directory per chart name so publish.sh can mirror that
-# layout onto gh-pages instead of dumping every version in one flat folder.
+# Packages every chart under charts/*/ into <out-dir>/<name>/, then validates
+# the packaged .tgz itself — not the source tree — with helm lint and helm
+# template per ci/*-values.yaml (and defaults) piped through kubeconform.
+# This applies the same way to source charts (helm package) and provisioned
+# charts (provision.sh's own output), so a provisioned chart's packaged
+# result gets the same scrutiny as one authored in this repo.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -20,6 +20,28 @@ render_and_check() {
     | kubeconform -strict -summary \
         -schema-location default \
         -schema-location "$KUBECONFORM_CRD_SCHEMA"
+}
+
+# helm lint/template on this helm build only accept a chart directory, not a
+# packaged archive, so unpack the .tgz we just produced/fetched and validate
+# that extracted copy — it's byte-for-byte what gets published.
+validate_package() {
+  local name="$1" ci_dir="$2" tgz="$3"
+  local extract_dir chart_dir
+  extract_dir="$(mktemp -d)"
+  tar xzf "$tgz" -C "$extract_dir"
+  chart_dir="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+
+  helm lint "$chart_dir"
+  render_and_check "$name" "$chart_dir"
+
+  shopt -s nullglob
+  for values_file in "${ci_dir}"*-values.yaml; do
+    render_and_check "$name" "$chart_dir" -f "$values_file"
+  done
+  shopt -u nullglob
+
+  rm -rf "$extract_dir"
 }
 
 for chart_dir in charts/*/; do
@@ -40,18 +62,15 @@ for chart_dir in charts/*/; do
   if (( has_provision )); then
     echo "== provisioning ${name} =="
     bash "${chart_dir}provision.sh" "$chart_out_dir"
-    continue
+  else
+    echo "== packaging ${name} =="
+    helm package "$chart_dir" -d "$chart_out_dir"
   fi
 
-  echo "== building ${name} =="
-  helm lint "$chart_dir"
-  render_and_check "$name" "$chart_dir"
-
+  echo "== validating ${name} =="
   shopt -s nullglob
-  for values_file in "${chart_dir}"ci/*-values.yaml; do
-    render_and_check "$name" "$chart_dir" -f "$values_file"
+  for tgz in "$chart_out_dir"/*.tgz; do
+    validate_package "$name" "${chart_dir}ci/" "$tgz"
   done
   shopt -u nullglob
-
-  helm package "$chart_dir" -d "$chart_out_dir"
 done
