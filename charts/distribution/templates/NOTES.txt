@@ -1,0 +1,20 @@
+distribution has been deployed as {{ include "distribution.fullname" . }}.
+
+Registry endpoint (inside the cluster):
+  http://{{ include "distribution.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+{{- if .Values.ingress.enabled }}
+
+External endpoint(s):
+{{- range .Values.ingress.hosts }}
+  http://{{ .host }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.gc.enabled }}
+
+Garbage collection runs as an initContainer on every pod (re)start, and the
+{{ include "distribution.fullname" . }}-gc CronJob restarts the Deployment on
+schedule ({{ .Values.gc.schedule }}) to trigger it periodically. The registry
+is unavailable for the duration of each GC run.
+{{- end }}

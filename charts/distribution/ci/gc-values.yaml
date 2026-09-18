@@ -1,0 +1,3 @@
+# Exercises the garbage-collection initContainer + restart CronJob path.
+gc:
+  enabled: true

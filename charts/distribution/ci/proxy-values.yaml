@@ -1,0 +1,5 @@
+# Pull-through cache in front of Docker Hub.
+config:
+  proxy:
+    remoteurl: https://registry-1.docker.io
+    ttl: 168h

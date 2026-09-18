@@ -1,0 +1,35 @@
+{{- if .Values.gc.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "distribution.fullname" . }}-gc
+  labels:
+    {{- include "distribution.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "distribution.fullname" . }}-gc
+  labels:
+    {{- include "distribution.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: [{{ include "distribution.fullname" . }}]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "distribution.fullname" . }}-gc
+  labels:
+    {{- include "distribution.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "distribution.fullname" . }}-gc
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "distribution.fullname" . }}-gc
+    namespace: {{ .Release.Namespace }}
+{{- end }}

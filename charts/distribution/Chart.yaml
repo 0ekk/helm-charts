@@ -1,0 +1,10 @@
+apiVersion: v2
+name: distribution
+description: A Helm chart for distribution/distribution (OCI registry v3)
+type: application
+version: 0.1.0
+appVersion: "3.1.1"
+sources:
+  - https://github.com/distribution/distribution
+annotations:
+  0ekk.github.io/upstream-repo: distribution/distribution

@@ -1,0 +1,120 @@
+name: Release charts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # GitHub cron is UTC.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  KUBECONFORM_VERSION: v0.7.0
+
+jobs:
+  release:
+    name: Validate, package and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      - name: Install kubeconform
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+
+      - name: Run script self-tests
+        shell: bash
+        run: scripts/test-lib.sh
+
+      - name: Bump upstream versions
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "changed<<BUMP_EOF"
+            scripts/bump.sh
+            echo "BUMP_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build and validate charts
+        shell: bash
+        run: scripts/build.sh dist
+
+      - name: Create kind cluster
+        if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.bump.outputs.changed != ''
+        uses: helm/kind-action@v1
+
+      - name: Install and test each source chart scenario
+        if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.bump.outputs.changed != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for chart_dir in charts/*/; do
+            [[ -f "${chart_dir}Chart.yaml" ]] || continue
+            chart_name="$(basename "$chart_dir")"
+
+            shopt -s nullglob
+            values_files=("${chart_dir}"ci/*-values.yaml)
+            shopt -u nullglob
+            [[ ${#values_files[@]} -gt 0 ]] || values_files=("__default__")
+
+            for values_file in "${values_files[@]}"; do
+              if [[ "$values_file" == "__default__" ]]; then
+                scenario="default"
+                args=()
+              else
+                scenario="$(basename "${values_file%-values.yaml}")"
+                args=(-f "$values_file")
+              fi
+              release="test-${chart_name}-${scenario}"
+
+              helm install "$release" "$chart_dir" "${args[@]}" --wait --timeout 3m
+              helm test "$release"
+              helm uninstall "$release" --wait
+            done
+          done
+
+      - name: Commit version bumps
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.bump.outputs.changed != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r path; do
+            [[ -n "$path" ]] || continue
+            chart="$(basename "$(dirname "$path")")"
+            app_version="$(yq '.appVersion' "$path")"
+            gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              -f message="Bump ${chart} to ${app_version}" \
+              -f content="$(base64 -w0 "$path")" \
+              -f sha="$(git rev-parse "HEAD:${path}")" \
+              -f branch=main
+          done <<< "${{ steps.bump.outputs.changed }}"
+
+      - name: Publish to gh-pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: bash
+        run: scripts/publish.sh dist

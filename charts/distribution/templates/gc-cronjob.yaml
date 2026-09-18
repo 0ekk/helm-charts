@@ -1,0 +1,35 @@
+{{- if .Values.gc.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "distribution.fullname" . }}-gc
+  labels:
+    {{- include "distribution.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.gc.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: {{ include "distribution.fullname" . }}-gc
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restart
+              image: registry.k8s.io/kubectl:v1.31.0
+              securityContext:
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              command:
+                - kubectl
+                - rollout
+                - restart
+                - deployment/{{ include "distribution.fullname" . }}
+{{- end }}

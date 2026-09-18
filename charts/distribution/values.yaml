@@ -1,0 +1,81 @@
+# -- Number of registry replicas. Must be 1 when gc.enabled is true.
+replicaCount: 1
+
+image:
+  repository: docker.io/library/registry
+  # -- Defaults to .Chart.AppVersion when unset.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Raw registry config (https://distribution.github.io/distribution/about/configuration/),
+# deep-merged over the chart's own defaults. Rendered into a Secret and mounted
+# read-only at /etc/distribution/config.yml. Put secrets in extraEnv instead
+# (e.g. REGISTRY_STORAGE_S3_SECRETKEY), not here.
+config: {}
+
+# -- Adds HTTP basic auth backed by an existing htpasswd Secret. Leave
+# enabled: false to leave config.auth untouched.
+auth:
+  htpasswd:
+    enabled: false
+    realm: "Registry Realm"
+    existingSecret: ""
+    secretKey: htpasswd
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  existingClaim: ""
+
+service:
+  type: ClusterIP
+  port: 5000
+
+metrics:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: registry.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# -- Garbage collection: an initContainer runs `registry garbage-collect`
+# before every pod (re)start (strategy is forced to Recreate so there is
+# never a writer during GC), and a CronJob periodically restarts the
+# Deployment to trigger it on a schedule. Requires replicaCount: 1.
+gc:
+  enabled: false
+  schedule: "0 3 * * *"
+  deleteUntagged: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
