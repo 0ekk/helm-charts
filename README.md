@@ -11,5 +11,5 @@ helm repo update
 
 | Chart | Versions published |
 |---|---|
-| code-server | 17 |
+| code-server | 18 |
 | distribution | 1 |
